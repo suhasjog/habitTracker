@@ -1,56 +1,66 @@
-import { useState, useCallback } from 'react'
-import { getHabits, saveHabits, getCompletions, saveCompletions, getTodayKey } from '../utils/storage'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useContext } from 'react'
+import { AuthContext } from '../App'
+import { getHabits, createHabit, updateHabit, deleteHabit } from '../services/habits'
+
+const HABITS_CACHE_KEY = 'ht_habits'
+
+function readCachedHabits() {
+  try {
+    const raw = localStorage.getItem(HABITS_CACHE_KEY)
+    return raw ? JSON.parse(raw) : null
+  } catch { return null }
+}
+
+function writeCachedHabits(habits) {
+  try { localStorage.setItem(HABITS_CACHE_KEY, JSON.stringify(habits)) } catch {}
+}
 
 export function useHabits() {
-  const [habits, setHabits] = useState(getHabits)
-  const [completions, setCompletions] = useState(getCompletions)
+  const { user } = useContext(AuthContext)
+  const queryClient = useQueryClient()
+  const isOffline = typeof navigator !== 'undefined' && !navigator.onLine
+  const cached = readCachedHabits()
 
-  const addHabit = useCallback((name) => {
-    const trimmed = name.trim()
-    if (!trimmed) return
-    const newHabit = {
-      id: crypto.randomUUID(),
-      name: trimmed,
-      createdAt: getTodayKey(),
-    }
-    const updated = [...getHabits(), newHabit]
-    saveHabits(updated)
-    setHabits(updated)
-  }, [])
+  const { data: habits = cached || [], isLoading, error } = useQuery({
+    queryKey: ['habits', user?.id],
+    queryFn: async () => {
+      const data = await getHabits()
+      writeCachedHabits(data)
+      return data
+    },
+    enabled: Boolean(user) && !isOffline,
+    initialData: isOffline && cached ? cached : undefined,
+  })
 
-  const deleteHabit = useCallback((id) => {
-    const updated = getHabits().filter((h) => h.id !== id)
-    saveHabits(updated)
-    setHabits(updated)
-  }, [])
+  const addMutation = useMutation({
+    mutationFn: ({ name, description, color, icon }) => createHabit(user.id, name, description, color, icon),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['habits'] }),
+  })
 
-  const toggleCompletion = useCallback((habitId) => {
-    const today = getTodayKey()
-    const all = getCompletions()
-    const todayList = all[today] || []
-    if (todayList.includes(habitId)) {
-      all[today] = todayList.filter((id) => id !== habitId)
-    } else {
-      all[today] = [...todayList, habitId]
-    }
-    saveCompletions(all)
-    setCompletions({ ...all })
-  }, [])
+  const editMutation = useMutation({
+    mutationFn: ({ id, name, description, color, icon }) => updateHabit(id, name, description, color, icon),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['habits'] }),
+  })
 
-  const todayKey = getTodayKey()
-  const todayCompletions = completions[todayKey] || []
-  const completedCount = todayCompletions.length
-  const totalCount = habits.length
-  const incompleteHabits = habits.filter((h) => !todayCompletions.includes(h.id))
+  const removeMutation = useMutation({
+    mutationFn: (id) => deleteHabit(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['habits'] })
+      queryClient.invalidateQueries({ queryKey: ['entries'] })
+    },
+  })
 
   return {
     habits,
-    todayCompletions,
-    completedCount,
-    totalCount,
-    incompleteHabits,
-    addHabit,
-    deleteHabit,
-    toggleCompletion,
+    isLoading,
+    error,
+    atLimit: habits.length >= 10,
+    addHabit: (name, description, color, icon) => addMutation.mutateAsync({ name, description, color, icon }),
+    editHabit: (id, name, description, color, icon) => editMutation.mutateAsync({ id, name, description, color, icon }),
+    removeHabit: (id) => removeMutation.mutateAsync(id),
+    addError: addMutation.error,
+    editError: editMutation.error,
+    removeError: removeMutation.error,
   }
 }

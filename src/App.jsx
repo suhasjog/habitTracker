@@ -1,57 +1,80 @@
-import { useHabits } from './hooks/useHabits'
-import { useNotification } from './hooks/useNotification'
-import AddHabit from './components/AddHabit'
-import HabitList from './components/HabitList'
+import { createContext, useContext } from 'react'
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { useAuth } from './hooks/useAuth'
+import BottomNav from './components/ui/BottomNav'
+import AuthPage from './pages/AuthPage'
+import HomePage from './pages/HomePage'
+import DashboardPage from './pages/DashboardPage'
+import SettingsPage from './pages/SettingsPage'
+import './App.css'
 
-export default function App() {
-  const {
-    habits,
-    todayCompletions,
-    completedCount,
-    totalCount,
-    addHabit,
-    deleteHabit,
-    toggleCompletion,
-  } = useHabits()
+export const AuthContext = createContext(null)
 
-  const { permission, requestPermission } = useNotification()
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: { staleTime: 1000 * 60 * 5, retry: 1 },
+  },
+})
 
-  const today = new Date().toLocaleDateString('en-US', {
-    weekday: 'long',
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-  })
+function ProtectedRoute({ children }) {
+  const { user, loading } = useContext(AuthContext)
+  if (loading) return <div className="loading-screen">Loading…</div>
+  if (!user) return <Navigate to="/auth" replace />
+  return children
+}
+
+function AppRoutes() {
+  const { user } = useContext(AuthContext)
 
   return (
-    <div className="app">
-      <header className="header">
-        <h1>Habit Tracker</h1>
-        <p className="date">{today}</p>
-        {totalCount > 0 && (
-          <p className="progress">
-            {completedCount}/{totalCount} done
-            {completedCount === totalCount && totalCount > 0 && ' \u2714'}
-          </p>
-        )}
-      </header>
-
-      {permission === 'default' && (
-        <div className="notification-banner">
-          <p>Enable reminders to stay on track at 10 PM</p>
-          <button onClick={requestPermission}>Enable</button>
-        </div>
-      )}
-
-      <main>
-        <AddHabit onAdd={addHabit} />
-        <HabitList
-          habits={habits}
-          todayCompletions={todayCompletions}
-          onToggle={toggleCompletion}
-          onDelete={deleteHabit}
+    <>
+      <Routes>
+        <Route path="/auth" element={<AuthPage />} />
+        <Route
+          path="/"
+          element={
+            <ProtectedRoute>
+              <HomePage />
+            </ProtectedRoute>
+          }
         />
-      </main>
-    </div>
+        <Route
+          path="/dashboard"
+          element={
+            <ProtectedRoute>
+              <DashboardPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/settings"
+          element={
+            <ProtectedRoute>
+              <SettingsPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+      {user && <BottomNav />}
+    </>
+  )
+}
+
+function AuthProvider({ children }) {
+  const auth = useAuth()
+  return <AuthContext.Provider value={auth}>{children}</AuthContext.Provider>
+}
+
+export default function App() {
+  return (
+    <QueryClientProvider client={queryClient}>
+      <BrowserRouter>
+        <AuthProvider>
+          <AppRoutes />
+        </AuthProvider>
+      </BrowserRouter>
+    </QueryClientProvider>
   )
 }
