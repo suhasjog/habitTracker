@@ -122,11 +122,29 @@ export function useEntries(habitIds = [], startDate = null, endDate = null) {
     return Boolean(entryByHabitId[habitId])
   }
 
-  // Marks a habit complete and returns the real DB entry (for attaching notes)
+  // Marks a habit complete with optimistic update; returns the real DB entry (for notes)
   async function markHabit(habitId) {
-    const entry = await markComplete(user.id, habitId, today)
-    queryClient.invalidateQueries({ queryKey: ['entries'] })
-    return entry
+    await queryClient.cancelQueries({ queryKey: ['entries'] })
+    const previousData = queryClient.getQueriesData({ queryKey: ['entries'] })
+    queryClient.setQueriesData({ queryKey: ['entries'] }, (old) => {
+      if (!old) return old
+      return [...old, {
+        id: `optimistic-${habitId}`,
+        habit_id: habitId,
+        date: today,
+        completed_at: new Date().toISOString(),
+      }]
+    })
+    try {
+      const entry = await markComplete(user.id, habitId, today)
+      queryClient.invalidateQueries({ queryKey: ['entries'] })
+      return entry
+    } catch (err) {
+      previousData.forEach(([queryKey, data]) => {
+        queryClient.setQueryData(queryKey, data)
+      })
+      throw err
+    }
   }
 
   return {

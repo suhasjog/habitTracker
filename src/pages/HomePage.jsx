@@ -58,16 +58,13 @@ export default function HomePage() {
   const isLoading = habitsLoading || (habitIds.length > 0 && entriesLoading)
 
   // Handle tap on habit check:
-  // - incomplete → mark via API (get real entry), then show QuickCheckIn
-  // - completed → unmark via toggle
+  // - incomplete → markHabit (optimistic update + single API call), then show QuickCheckIn
+  // - completed  → toggleCompletion (unmark)
   async function handleToggle(habitId) {
     if (isCompleted(habitId)) {
       toggleCompletion(habitId)
       return
     }
-    // Apply optimistic visual immediately
-    toggleCompletion(habitId)
-    // Then get real entry for QuickCheckIn note
     try {
       const entry = await markHabit(habitId)
       const habit = habits.find(h => h.id === habitId)
@@ -75,7 +72,7 @@ export default function HomePage() {
         setQuickCheckIn({ habit, entry })
       }
     } catch {
-      // markHabit failed — optimistic update already shown, will reconcile on next refetch
+      // markHabit failed — optimistic update rolled back automatically
     }
   }
 
